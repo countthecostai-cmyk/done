@@ -1,9 +1,18 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { TaskActions } from "@/components/TaskActions";
+import { TaskDetailRealtime } from "@/components/Realtime";
+import { TaskMessages } from "@/components/TaskMessages";
 import { STATUS_LABELS, type TaskStatus } from "@/lib/task-state-machine";
-import { formatCents } from "@/lib/pricing";
-import type { DoerProfile, Profile, Task, TaskStatusHistoryRow, TaskType } from "@/lib/database.types";
+import { formatChargeBreakdown } from "@/lib/pricing";
+import type {
+  Message,
+  Profile,
+  Review,
+  Task,
+  TaskStatusHistoryRow,
+  TaskType,
+} from "@/lib/database.types";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +24,7 @@ export default async function TaskDetailPage({
   searchParams: Promise<{ payment_error?: string; paid?: string }>;
 }) {
   const { id } = await params;
-  const { payment_error } = await searchParams;
+  const { payment_error, paid } = await searchParams;
   const supabase = await createClient();
   const {
     data: { user },
@@ -36,18 +45,20 @@ export default async function TaskDetailPage({
     doer: Profile | null;
   };
 
-  const { data: doerProfile } = await supabase
-    .from("doer_profiles")
-    .select("*")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  const isApprovedDoer = (doerProfile as DoerProfile | null)?.status === "approved";
+  const isRequester = task.requester_id === user.id;
+  if (!isRequester) notFound(); // this app is Requester-only; nothing else to show them here
 
-  const { data: history } = await supabase
-    .from("task_status_history")
-    .select("*")
-    .eq("task_id", id)
-    .order("created_at", { ascending: true });
+  const [{ data: history }, { data: existingReview }, { data: messages }] = await Promise.all([
+    supabase
+      .from("task_status_history")
+      .select("*")
+      .eq("task_id", id)
+      .order("created_at", { ascending: true }),
+    supabase.from("reviews").select("*").eq("task_id", id).eq("rater_id", user.id).maybeSingle(),
+    task.doer_id
+      ? supabase.from("messages").select("*").eq("task_id", id).order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] as Message[] }),
+  ]);
 
   let photoUrl: string | null = null;
   if (task.completion_photo_url) {
@@ -57,18 +68,22 @@ export default async function TaskDetailPage({
     photoUrl = signed?.signedUrl ?? null;
   }
 
-  const isRequester = task.requester_id === user.id;
-  const isAssignedDoer = task.doer_id === user.id;
-  const canClaim = isApprovedDoer && !task.doer_id;
-
   return (
     <div className="mx-auto max-w-2xl px-6 py-10">
+      <TaskDetailRealtime taskId={task.id} />
+
+      {paid && (
+        <div className="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">
+          Payment received — thank you! Your Doer will be paid out shortly.
+        </div>
+      )}
       {payment_error && (
         <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           This task is confirmed, but payment couldn&apos;t be started automatically (Stripe isn&apos;t
           connected yet). An admin will need to resolve payment for this task manually.
         </div>
       )}
+
       <div className="mb-6 flex items-start justify-between">
         <div>
           <h1 className="text-2xl font-semibold">{task.task_types?.name ?? task.title}</h1>
@@ -81,20 +96,12 @@ export default async function TaskDetailPage({
 
       <div className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-neutral-200 bg-white p-4 text-sm">
         <div>
-          <p className="text-neutral-500">Price</p>
-          <p className="font-medium">{formatCents(task.price_cents, task.currency)}</p>
-        </div>
-        <div>
-          <p className="text-neutral-500">Doer payout</p>
-          <p className="font-medium">{formatCents(task.doer_payout_cents, task.currency)}</p>
-        </div>
-        <div>
-          <p className="text-neutral-500">Requester</p>
-          <p className="font-medium">{task.requester?.full_name ?? "—"}</p>
+          <p className="text-neutral-500">Total</p>
+          <p className="font-medium">{formatChargeBreakdown(task.price_cents, task.tip_cents, task.currency)}</p>
         </div>
         <div>
           <p className="text-neutral-500">Doer</p>
-          <p className="font-medium">{task.doer?.full_name ?? "Unclaimed"}</p>
+          <p className="font-medium">{task.doer?.full_name ?? "Finding a Doer…"}</p>
         </div>
       </div>
 
@@ -115,12 +122,28 @@ export default async function TaskDetailPage({
         <TaskActions
           taskId={task.id}
           status={task.status}
-          requiresPhotoProof={task.requires_photo_proof}
           isRequester={isRequester}
-          isAssignedDoer={isAssignedDoer}
-          canClaim={canClaim}
+          tipCents={task.tip_cents}
+          alreadyReviewed={!!existingReview}
         />
+        {existingReview && (
+          <p className="mt-3 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            You rated this Doer {(existingReview as Review).rating}/5.
+            {(existingReview as Review).comment ? ` "${(existingReview as Review).comment}"` : ""}
+          </p>
+        )}
       </div>
+
+      {task.doer_id && (
+        <div className="mb-6">
+          <TaskMessages
+            taskId={task.id}
+            currentUserId={user.id}
+            otherPartyName={task.doer?.full_name ?? "your Doer"}
+            initialMessages={(messages as Message[]) ?? []}
+          />
+        </div>
+      )}
 
       <div>
         <h2 className="mb-3 text-sm font-semibold text-neutral-700">Timeline</h2>
