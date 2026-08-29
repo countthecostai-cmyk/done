@@ -17,12 +17,12 @@ export default function Home() {
         >
           Request a task
         </Link>
-        <Link
-          href="/doer/apply"
+        <a
+          href={process.env.NEXT_PUBLIC_DOER_APP_URL ?? "#"}
           className="rounded-lg border border-neutral-300 px-6 py-3 text-sm font-medium text-neutral-900 hover:bg-neutral-100"
         >
           Become a Doer
-        </Link>
+        </a>
       </div>
     </div>
   );
