@@ -1,63 +1,43 @@
 "use client";
 
 import { useActionState, useState } from "react";
-import {
-  acceptTask,
-  startTask,
-  completeTask,
-  confirmCompletion,
-  reportCompletionProblem,
-  cancelTask,
-} from "@/app/tasks/actions";
+import { confirmCompletion, reportCompletionProblem, cancelTask, setTip, rateDoer } from "@/app/tasks/actions";
 import type { TaskStatus } from "@/lib/task-state-machine";
+
+const REQUESTER_CANCELLABLE: TaskStatus[] = [
+  "requested",
+  "matching",
+  "quoted",
+  "accepted",
+  "scheduled",
+  "en_route",
+  "arrived",
+];
 
 export function TaskActions({
   taskId,
   status,
-  requiresPhotoProof,
   isRequester,
-  isAssignedDoer,
-  canClaim,
+  tipCents,
+  alreadyReviewed,
 }: {
   taskId: string;
   status: TaskStatus;
-  requiresPhotoProof: boolean;
   isRequester: boolean;
-  isAssignedDoer: boolean;
-  canClaim: boolean;
+  tipCents: number;
+  alreadyReviewed: boolean;
 }) {
   const [reportingProblem, setReportingProblem] = useState(false);
 
-  if (canClaim && status === "matching") {
-    return (
-      <form action={acceptTask.bind(null, taskId)}>
-        <button className="w-full rounded-lg bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800">
-          Accept this task
-        </button>
-      </form>
-    );
-  }
+  if (!isRequester) return null;
 
-  if (isAssignedDoer && status === "accepted") {
-    return (
-      <form action={startTask.bind(null, taskId)}>
-        <button className="w-full rounded-lg bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800">
-          Start task
-        </button>
-      </form>
-    );
-  }
-
-  if (isAssignedDoer && status === "in_progress") {
-    return <CompleteForm taskId={taskId} requiresPhotoProof={requiresPhotoProof} />;
-  }
-
-  if (isRequester && status === "completed") {
+  if (status === "completed") {
     return (
       <div className="space-y-3">
+        <TipForm taskId={taskId} tipCents={tipCents} />
         <form action={confirmCompletion.bind(null, taskId)}>
           <button className="w-full rounded-lg bg-green-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-green-700">
-            Confirm & pay
+            Confirm &amp; pay
           </button>
         </form>
         {!reportingProblem ? (
@@ -74,59 +54,88 @@ export function TaskActions({
     );
   }
 
-  if (
-    (isRequester || isAssignedDoer) &&
-    ["requested", "matching", "accepted", "scheduled", "en_route", "arrived"].includes(status)
-  ) {
+  if (status === "payout_completed" && !alreadyReviewed) {
+    return <RateForm taskId={taskId} />;
+  }
+
+  if (REQUESTER_CANCELLABLE.includes(status)) {
     return <CancelForm taskId={taskId} />;
   }
 
   return null;
 }
 
-function CompleteForm({
-  taskId,
-  requiresPhotoProof,
-}: {
-  taskId: string;
-  requiresPhotoProof: boolean;
-}) {
-  const boundAction = async (
-    prevState: { error?: string } | undefined,
-    formData: FormData
-  ) => completeTask(taskId, formData);
+function TipForm({ taskId, tipCents }: { taskId: string; tipCents: number }) {
+  const boundAction = async (prevState: { error?: string } | undefined, formData: FormData) =>
+    setTip(taskId, formData);
   const [state, formAction, pending] = useActionState(boundAction, undefined);
 
   return (
-    <form action={formAction} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
-      <p className="text-sm font-medium text-neutral-900">Mark this task complete</p>
-      <div>
-        <label className="block text-xs font-medium text-neutral-600" htmlFor="photo">
-          {requiresPhotoProof ? "Completion photo (required)" : "Completion photo (optional)"}
-        </label>
+    <form action={formAction} className="space-y-2 rounded-lg border border-neutral-200 bg-white p-4">
+      <label className="block text-sm font-medium text-neutral-900" htmlFor="tip_dollars">
+        {tipCents > 0 ? "Update tip for your Doer" : "Add a tip for your Doer (optional)"}
+      </label>
+      <p className="text-xs text-neutral-500">100% of the tip goes to your Doer.</p>
+      <div className="flex gap-2">
         <input
-          id="photo"
-          name="photo"
-          type="file"
-          accept="image/*"
-          capture="environment"
-          required={requiresPhotoProof}
-          className="mt-1 w-full text-sm"
+          id="tip_dollars"
+          name="tip_dollars"
+          type="number"
+          min="0"
+          step="0.01"
+          defaultValue={tipCents > 0 ? (tipCents / 100).toFixed(2) : ""}
+          placeholder="0.00"
+          className="w-32 rounded-lg border border-neutral-300 px-3 py-2 text-sm"
         />
+        <button
+          type="submit"
+          disabled={pending}
+          className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-50"
+        >
+          {pending ? "Saving…" : "Save tip"}
+        </button>
       </div>
-      <div>
-        <label className="block text-xs font-medium text-neutral-600" htmlFor="note">
-          Note (optional)
-        </label>
-        <textarea id="note" name="note" rows={2} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+    </form>
+  );
+}
+
+function RateForm({ taskId }: { taskId: string }) {
+  const boundAction = async (prevState: { error?: string } | undefined, formData: FormData) =>
+    rateDoer(taskId, formData);
+  const [state, formAction, pending] = useActionState(boundAction, undefined);
+  const [rating, setRating] = useState(5);
+
+  return (
+    <form action={formAction} className="space-y-3 rounded-lg border border-neutral-200 bg-white p-4">
+      <p className="text-sm font-medium text-neutral-900">Rate your Doer</p>
+      <input type="hidden" name="rating" value={rating} />
+      <div className="flex gap-1 text-2xl">
+        {[1, 2, 3, 4, 5].map((n) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => setRating(n)}
+            aria-label={`${n} star${n === 1 ? "" : "s"}`}
+            className={n <= rating ? "text-amber-500" : "text-neutral-300"}
+          >
+            ★
+          </button>
+        ))}
       </div>
+      <textarea
+        name="comment"
+        rows={2}
+        placeholder="Leave a comment (optional)"
+        className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+      />
       {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
       <button
         type="submit"
         disabled={pending}
         className="w-full rounded-lg bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white hover:bg-neutral-800 disabled:opacity-50"
       >
-        {pending ? "Submitting…" : "Mark complete"}
+        {pending ? "Submitting…" : "Submit rating"}
       </button>
     </form>
   );

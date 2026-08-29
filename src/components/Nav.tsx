@@ -1,7 +1,10 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { signOut } from "@/app/auth/actions";
-import type { Profile } from "@/lib/database.types";
+import { NotificationBell } from "@/components/NotificationBell";
+import type { NotificationRow, Profile } from "@/lib/database.types";
+
+const DOER_APP_URL = process.env.NEXT_PUBLIC_DOER_APP_URL;
 
 export async function Nav() {
   const supabase = await createClient();
@@ -10,13 +13,19 @@ export async function Nav() {
   } = await supabase.auth.getUser();
 
   let profile: Profile | null = null;
+  let notifications: NotificationRow[] = [];
   if (user) {
-    const { data } = await supabase
-      .from("profiles")
-      .select("*")
-      .eq("id", user.id)
-      .maybeSingle();
-    profile = data as Profile | null;
+    const [{ data: profileData }, { data: notificationData }] = await Promise.all([
+      supabase.from("profiles").select("*").eq("id", user.id).maybeSingle(),
+      supabase
+        .from("notifications")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+        .limit(20),
+    ]);
+    profile = profileData as Profile | null;
+    notifications = (notificationData as NotificationRow[]) ?? [];
   }
 
   return (
@@ -34,16 +43,20 @@ export async function Nav() {
               <Link href="/request/new" className="text-neutral-600 hover:text-neutral-900">
                 Request a task
               </Link>
-              {!profile?.is_doer && (
-                <Link href="/doer/apply" className="text-neutral-600 hover:text-neutral-900">
+              <Link href="/receipts" className="text-neutral-600 hover:text-neutral-900">
+                Receipts
+              </Link>
+              {!profile?.is_doer && DOER_APP_URL && (
+                <a
+                  href={DOER_APP_URL}
+                  className="text-neutral-600 hover:text-neutral-900"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   Become a Doer
-                </Link>
+                </a>
               )}
-              {profile?.is_admin && (
-                <Link href="/admin/doers" className="text-neutral-600 hover:text-neutral-900">
-                  Admin
-                </Link>
-              )}
+              <NotificationBell userId={user.id} initialNotifications={notifications} />
               <form action={signOut}>
                 <button className="rounded-lg border border-neutral-300 px-3 py-1.5 text-neutral-700 hover:bg-neutral-50">
                   Sign out
