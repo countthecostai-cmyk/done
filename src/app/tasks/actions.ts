@@ -5,6 +5,7 @@ import { createServiceClient } from "@/lib/supabase/service";
 import { transitionTask, TransitionConflictError, IllegalTransitionError } from "@/lib/task-transitions";
 import { notify } from "@/lib/notify";
 import { getStripe } from "@/lib/stripe";
+import { totalChargeCents } from "@/lib/pricing";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { Task } from "@/lib/database.types";
@@ -17,117 +18,58 @@ function friendlyError(e: unknown): string {
   return "Something went wrong. Please try again.";
 }
 
-// acceptTask/startTask are invoked directly as <form action> references (no
-// local error UI), so per the Next.js data-security guidance for
-// destructive/state-changing actions with no inline error display, failures
-// throw (a loud failure) rather than returning a value — a value returned
-// from a bare `<form action>` isn't rendered anywhere anyway, and Next's
-// `action` prop type requires void | Promise<void>.
+/**
+ * Requester-only actions. This is the Done (customer) app — accepting,
+ * starting, and marking a task complete are Doer actions and live in the
+ * Doer app instead (both write to the same shared `tasks` table via the
+ * same `transitionTask()` state machine, so either app moving a task
+ * forward is immediately visible in the other via Realtime).
+ */
 
-export async function acceptTask(taskId: string): Promise<void> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("You must be signed in.");
-
-  const task = await transitionTask<Partial<Task>>(supabase, {
-    taskId,
-    from: "matching",
-    to: "accepted",
-    actor: "doer",
-    changedByUser: user.id,
-    extraPatch: { doer_id: user.id },
-  });
-  await notify(
-    task.requester_id,
-    "task_accepted",
-    "A Doer accepted your task",
-    "Your task has been claimed and will begin soon."
-  );
-
-  revalidatePath(`/tasks/${taskId}`);
-  revalidatePath("/dashboard");
-  redirect(`/tasks/${taskId}`);
-}
-
-export async function startTask(taskId: string): Promise<void> {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("You must be signed in.");
-
-  await transitionTask(supabase, {
-    taskId,
-    from: "accepted",
-    to: "in_progress",
-    actor: "doer",
-    changedByUser: user.id,
-  });
-
-  revalidatePath(`/tasks/${taskId}`);
-}
-
-export async function completeTask(
-  taskId: string,
-  formData: FormData
-): Promise<{ error?: string }> {
+/**
+ * Set (or update) a tip. Only legal while the task is `completed` — after
+ * the work is done and proof is in, before Confirm & Pay — and only by the
+ * Requester; `tasks_lock_tip_trg` (0006) enforces this again at the DB
+ * level, this is just the UX-layer check. 100% of the tip goes to the Doer.
+ */
+export async function setTip(taskId: string, formData: FormData): Promise<{ error?: string }> {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return { error: "You must be signed in." };
 
+  const raw = String(formData.get("tip_dollars") ?? "").trim();
+  const dollars = Number(raw);
+  if (raw === "" || !Number.isFinite(dollars) || dollars < 0) {
+    return { error: "Enter a valid tip amount." };
+  }
+  const tipCents = Math.round(dollars * 100);
+
   const { data: task } = await supabase
     .from("tasks")
-    .select("requires_photo_proof")
+    .select("id, requester_id, status")
     .eq("id", taskId)
     .maybeSingle();
   if (!task) return { error: "Task not found." };
-
-  const photo = formData.get("photo") as File | null;
-  const note = String(formData.get("note") ?? "").slice(0, 2000);
-
-  // The Doer marking a task complete must never be sufficient on its own to
-  // trigger payout — proof is required server-side, not just hinted at in
-  // the UI (see payout trust gate in the architecture doc).
-  if (task.requires_photo_proof && (!photo || photo.size === 0)) {
-    return { error: "A completion photo is required for this task type." };
+  if (task.requester_id !== user.id) return { error: "Only the Requester can set a tip." };
+  if (task.status !== "completed") {
+    return { error: "Tips can only be set after the task is marked complete, before you pay." };
   }
 
-  let completionPhotoUrl: string | null = null;
-  if (photo && photo.size > 0) {
-    const ext = photo.name.split(".").pop() ?? "jpg";
-    const path = `${taskId}/${Date.now()}.${ext}`;
-    const { error: uploadError } = await supabase.storage
-      .from("task-photos")
-      .upload(path, photo, { contentType: photo.type, upsert: false });
-    if (uploadError) return { error: `Photo upload failed: ${uploadError.message}` };
-    completionPhotoUrl = path;
-  }
+  const { error } = await supabase.from("tasks").update({ tip_cents: tipCents }).eq("id", taskId);
+  if (error) return { error: error.message };
 
-  try {
-    const updated = await transitionTask<Partial<Task>>(supabase, {
-      taskId,
-      from: "in_progress",
-      to: "completed",
-      actor: "doer",
-      changedByUser: user.id,
-      note: note || undefined,
-      extraPatch: {
-        completion_photo_url: completionPhotoUrl,
-        completion_note: note || null,
-      },
-    });
-    await notify(
-      updated.requester_id,
-      "task_completed",
-      "Your task is marked complete",
-      "Review the completion photo and confirm to release payment."
-    );
-  } catch (e) {
-    return { error: friendlyError(e) };
+  if (tipCents > 0) {
+    const { data: fresh } = await supabase.from("tasks").select("doer_id, title").eq("id", taskId).maybeSingle();
+    if (fresh?.doer_id) {
+      await notify(
+        fresh.doer_id,
+        "tip_added",
+        "You got a tip!",
+        `A ${(tipCents / 100).toFixed(2)} tip was added for "${fresh.title}".`
+      );
+    }
   }
 
   revalidatePath(`/tasks/${taskId}`);
@@ -137,8 +79,9 @@ export async function completeTask(
 /**
  * Requester-initiated confirmation. This is the ONLY thing that moves a
  * completed task toward payout — reaching "completed" never auto-triggers
- * it. Charges the Requester via Stripe Checkout; the webhook (on payment
- * success) initiates the Doer payout and completes the loop.
+ * it. Charges the Requester (price + tip) via Stripe Checkout; the webhook
+ * (on payment success) initiates the Doer payout (their fee-split cut +
+ * 100% of the tip) and completes the loop.
  */
 export async function confirmCompletion(taskId: string): Promise<void> {
   const supabase = await createClient();
@@ -147,11 +90,7 @@ export async function confirmCompletion(taskId: string): Promise<void> {
   } = await supabase.auth.getUser();
   if (!user) throw new Error("You must be signed in.");
 
-  const { data: task } = await supabase
-    .from("tasks")
-    .select("*")
-    .eq("id", taskId)
-    .maybeSingle();
+  const { data: task } = await supabase.from("tasks").select("*").eq("id", taskId).maybeSingle();
   if (!task) throw new Error("Task not found.");
 
   const updated = (await transitionTask<Partial<Task>>(supabase, {
@@ -162,6 +101,8 @@ export async function confirmCompletion(taskId: string): Promise<void> {
     changedByUser: user.id,
   })) as Task;
 
+  const chargeCents = totalChargeCents(updated.price_cents, updated.tip_cents);
+
   let checkoutUrl: string;
   try {
     const stripe = getStripe();
@@ -171,8 +112,10 @@ export async function confirmCompletion(taskId: string): Promise<void> {
         {
           price_data: {
             currency: updated.currency,
-            unit_amount: updated.price_cents,
-            product_data: { name: updated.title },
+            unit_amount: chargeCents,
+            product_data: {
+              name: updated.tip_cents > 0 ? `${updated.title} (incl. tip)` : updated.title,
+            },
           },
           quantity: 1,
         },
@@ -191,7 +134,7 @@ export async function confirmCompletion(taskId: string): Promise<void> {
         task_id: taskId,
         requester_id: updated.requester_id,
         stripe_payment_intent_id: (session.payment_intent as string) ?? null,
-        amount_cents: updated.price_cents,
+        amount_cents: chargeCents,
         currency: updated.currency,
         status: "pending",
       },
@@ -254,15 +197,14 @@ export async function cancelTask(taskId: string, formData: FormData): Promise<{ 
 
   const { data: task } = await supabase.from("tasks").select("*").eq("id", taskId).maybeSingle();
   if (!task) return { error: "Task not found." };
-
-  const actor = task.requester_id === user.id ? "requester" : "doer";
+  if (task.requester_id !== user.id) return { error: "Only the Requester can cancel here." };
 
   try {
     await transitionTask(supabase, {
       taskId,
       from: task.status,
       to: "cancelled",
-      actor,
+      actor: "requester",
       changedByUser: user.id,
       note: reason || undefined,
       extraPatch: { cancellation_reason: reason || null },
@@ -273,5 +215,54 @@ export async function cancelTask(taskId: string, formData: FormData): Promise<{ 
 
   revalidatePath(`/tasks/${taskId}`);
   revalidatePath("/dashboard");
+  return {};
+}
+
+/**
+ * Rate & review the Doer once the loop is fully done (payout_completed —
+ * money has actually moved, not just "confirmed"). One review per task,
+ * enforced by the `reviews` table's unique constraint (0001); a duplicate
+ * insert surfaces as a friendly "already reviewed" error, not a crash.
+ */
+export async function rateDoer(taskId: string, formData: FormData): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "You must be signed in." };
+
+  const rating = Number(formData.get("rating"));
+  const comment = String(formData.get("comment") ?? "").trim().slice(0, 2000);
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    return { error: "Pick a rating from 1 to 5." };
+  }
+
+  const { data: task } = await supabase
+    .from("tasks")
+    .select("id, requester_id, doer_id, status")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (!task) return { error: "Task not found." };
+  if (task.requester_id !== user.id) return { error: "Only the Requester can rate this task." };
+  if (!task.doer_id) return { error: "This task has no Doer to rate." };
+  if (task.status !== "payout_completed") {
+    return { error: "You can rate once the task is fully paid out." };
+  }
+
+  const { error } = await supabase.from("reviews").insert({
+    task_id: taskId,
+    rater_id: user.id,
+    ratee_id: task.doer_id,
+    rating,
+    comment: comment || null,
+  });
+  if (error) {
+    if (error.code === "23505") return { error: "You've already reviewed this task." };
+    return { error: error.message };
+  }
+
+  await notify(task.doer_id, "new_review", "You got a new rating", `${rating}/5 stars.`);
+
+  revalidatePath(`/tasks/${taskId}`);
   return {};
 }
