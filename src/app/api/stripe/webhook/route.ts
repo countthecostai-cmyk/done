@@ -4,6 +4,7 @@ import { getStripe } from "@/lib/stripe";
 import { createServiceClient } from "@/lib/supabase/service";
 import { transitionTask } from "@/lib/task-transitions";
 import { notify } from "@/lib/notify";
+import { totalDoerPayoutCents } from "@/lib/pricing";
 
 export const dynamic = "force-dynamic";
 
@@ -65,11 +66,15 @@ export async function POST(request: NextRequest) {
           .eq("user_id", task.doer_id)
           .maybeSingle();
 
+        // 100% of the tip is Doer-owned, on top of their fee-split payout —
+        // see tasks.tip_cents (0006) and the comment on payouts.amount_cents.
+        const payoutAmountCents = totalDoerPayoutCents(task.doer_payout_cents, task.tip_cents ?? 0);
+
         await supabase.from("payouts").upsert(
           {
             task_id: taskId,
             doer_id: task.doer_id,
-            amount_cents: task.doer_payout_cents,
+            amount_cents: payoutAmountCents,
             currency: task.currency,
             status: "pending",
           },
@@ -79,7 +84,7 @@ export async function POST(request: NextRequest) {
         if (doerAccount?.payouts_enabled) {
           try {
             const transfer = await stripe.transfers.create({
-              amount: task.doer_payout_cents,
+              amount: payoutAmountCents,
               currency: task.currency,
               destination: doerAccount.stripe_account_id,
               transfer_group: taskId,
