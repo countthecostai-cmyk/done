@@ -1,5 +1,5 @@
 /**
- * Hand-written types mirroring supabase/migrations/0001-0004. Once a live
+ * Hand-written types mirroring supabase/migrations/0001-0008. Once a live
  * Supabase project is connected, replace/augment this with the output of
  * `generate_typescript_types` — keep this file's shape compatible so the
  * swap is a no-op for callers.
@@ -29,6 +29,10 @@ export interface Profile {
   avatar_url: string | null;
   is_admin: boolean;
   is_doer: boolean;
+  is_suspended: boolean;
+  suspended_reason: string | null;
+  suspended_at: string | null;
+  suspended_by: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +42,7 @@ export interface DoerProfile {
   status: DoerStatus;
   identity_verified: boolean;
   background_check_status: BackgroundCheckStatus;
+  is_available: boolean;
   rating_avg: number | null;
   rating_count: number;
   bio: string | null;
@@ -105,6 +110,7 @@ export interface Task {
   price_cents: number;
   platform_fee_cents: number;
   doer_payout_cents: number;
+  tip_cents: number;
   currency: string;
   requires_photo_proof: boolean;
   completion_photo_url: string | null;
@@ -180,6 +186,16 @@ export interface NotificationRow {
   title: string;
   body: string | null;
   data: Record<string, unknown>;
+  read_at: string | null;
+  created_at: string;
+}
+
+export interface Message {
+  id: string;
+  task_id: string;
+  sender_id: string;
+  recipient_id: string;
+  body: string;
   read_at: string | null;
   created_at: string;
 }

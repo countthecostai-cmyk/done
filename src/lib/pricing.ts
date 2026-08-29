@@ -63,3 +63,29 @@ export function formatCents(cents: number, currency = "usd"): string {
     currency: currency.toUpperCase(),
   }).format(cents / 100);
 }
+
+/**
+ * Total actually charged to the Requester (price + tip). Tip is 100%
+ * Doer-owned and never subject to the platform fee split — see
+ * 0006_messaging_tips_availability_moderation.sql.
+ */
+export function totalChargeCents(priceCents: number, tipCents: number): number {
+  return priceCents + Math.max(tipCents, 0);
+}
+
+/** What the Doer actually receives for a task: their fee-split payout + 100% of the tip. */
+export function totalDoerPayoutCents(doerPayoutCents: number, tipCents: number): number {
+  return doerPayoutCents + Math.max(tipCents, 0);
+}
+
+export function formatChargeBreakdown(
+  priceCents: number,
+  tipCents: number,
+  currency = "usd"
+): string {
+  if (tipCents <= 0) return formatCents(priceCents, currency);
+  return `${formatCents(priceCents, currency)} + ${formatCents(tipCents, currency)} tip = ${formatCents(
+    totalChargeCents(priceCents, tipCents),
+    currency
+  )}`;
+}
