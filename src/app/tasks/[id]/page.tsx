@@ -1,9 +1,10 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { TaskActions } from "@/components/TaskActions";
+import { PromoCodeForm } from "@/components/PromoCodeForm";
 import { TaskDetailRealtime } from "@/components/Realtime";
 import { TaskMessages } from "@/components/TaskMessages";
-import { STATUS_LABELS, type TaskStatus } from "@/lib/task-state-machine";
+import { STATUS_LABELS, PROMO_LOCKED_STATUSES, type TaskStatus } from "@/lib/task-state-machine";
 import { formatChargeBreakdown } from "@/lib/pricing";
 import type {
   Message,
@@ -97,13 +98,26 @@ export default async function TaskDetailPage({
       <div className="mb-6 grid grid-cols-2 gap-4 rounded-lg border border-neutral-200 bg-white p-4 text-sm">
         <div>
           <p className="text-neutral-500">Total</p>
-          <p className="font-medium">{formatChargeBreakdown(task.price_cents, task.tip_cents, task.currency)}</p>
+          <p className="font-medium">
+            {formatChargeBreakdown(task.price_cents, task.tip_cents, task.currency, task.discount_cents)}
+          </p>
         </div>
         <div>
           <p className="text-neutral-500">Doer</p>
           <p className="font-medium">{task.doer?.full_name ?? "Finding a Doer…"}</p>
         </div>
       </div>
+
+      {isRequester && !PROMO_LOCKED_STATUSES.includes(task.status) && (
+        <div className="mb-6">
+          <PromoCodeForm
+            taskId={task.id}
+            promoCode={task.promo_code}
+            discountCents={task.discount_cents}
+            currency={task.currency}
+          />
+        </div>
+      )}
 
       {task.description && (
         <p className="mb-6 rounded-lg bg-neutral-50 p-3 text-sm text-neutral-700">{task.description}</p>

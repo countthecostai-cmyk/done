@@ -6,9 +6,11 @@ import { transitionTask, TransitionConflictError, IllegalTransitionError } from 
 import { notify } from "@/lib/notify";
 import { getStripe } from "@/lib/stripe";
 import { totalChargeCents } from "@/lib/pricing";
+import { computeDiscountCents, normalizePromoCode, promoEligibilityError } from "@/lib/promo";
+import { PROMO_LOCKED_STATUSES } from "@/lib/task-state-machine";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { Task } from "@/lib/database.types";
+import type { Promotion, Task } from "@/lib/database.types";
 
 function friendlyError(e: unknown): string {
   if (e instanceof TransitionConflictError || e instanceof IllegalTransitionError) {
@@ -77,6 +79,122 @@ export async function setTip(taskId: string, formData: FormData): Promise<{ erro
 }
 
 /**
+ * Apply a promo code to a task before paying. The AUTHORITATIVE checks
+ * (redemption caps, per-user limit, expiry, min subtotal) live in the
+ * database — enforce_promotion_limits() locks the promotion row so two
+ * concurrent redemptions of a nearly-exhausted code can't both slip past
+ * the cap (0011_promotions.sql). Everything here is the same read-only
+ * pre-check done with the Requester's own RLS-scoped client (no service
+ * role — mirrors the service-area gate in request/actions.ts), purely so a
+ * predictable, common failure returns a friendly message instead of a raw
+ * Postgres exception.
+ */
+export async function applyPromoCode(taskId: string, formData: FormData): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "You must be signed in." };
+
+  const rawCode = String(formData.get("promo_code") ?? "").trim();
+  if (!rawCode) return { error: "Enter a promo code." };
+  const code = normalizePromoCode(rawCode);
+
+  const { data: task } = await supabase
+    .from("tasks")
+    .select("id, requester_id, status, price_cents, promo_code")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (!task) return { error: "Task not found." };
+  if (task.requester_id !== user.id) return { error: "Only the Requester can apply a promo code." };
+  if (PROMO_LOCKED_STATUSES.includes(task.status)) {
+    return { error: "This task can no longer have a promo code applied." };
+  }
+  if (task.promo_code) {
+    return { error: "Remove the current code before applying a different one." };
+  }
+
+  const { data: promo } = await supabase.from("promotions").select("*").eq("code", code).maybeSingle();
+  if (!promo) return { error: "That promo code isn't valid." };
+
+  const ineligible = promoEligibilityError(promo as Promotion, task.price_cents);
+  if (ineligible) return { error: ineligible };
+
+  const { count: userRedemptions } = await supabase
+    .from("promotion_redemptions")
+    .select("id", { count: "exact", head: true })
+    .eq("promotion_id", promo.id)
+    .eq("user_id", user.id);
+  if ((userRedemptions ?? 0) >= promo.per_user_limit) {
+    return { error: "You've already used this code the maximum number of times." };
+  }
+  if (promo.max_redemptions != null) {
+    const { count: totalRedemptions } = await supabase
+      .from("promotion_redemptions")
+      .select("id", { count: "exact", head: true })
+      .eq("promotion_id", promo.id);
+    if ((totalRedemptions ?? 0) >= promo.max_redemptions) {
+      return { error: "This code has reached its redemption limit." };
+    }
+  }
+
+  const discountCents = computeDiscountCents(promo as Promotion, task.price_cents);
+
+  const { error: redeemError } = await supabase.from("promotion_redemptions").insert({
+    promotion_id: promo.id,
+    task_id: taskId,
+    user_id: user.id,
+    discount_cents: discountCents,
+  });
+  if (redeemError) {
+    if (redeemError.code === "23505") return { error: "This task already has a promo code applied." };
+    return { error: redeemError.message || "Could not apply that code." };
+  }
+
+  const { error: updateError } = await supabase
+    .from("tasks")
+    .update({ promo_code: code, discount_cents: discountCents })
+    .eq("id", taskId);
+  if (updateError) {
+    // Redemption row is in but the task update failed — surface it rather
+    // than silently leaving a redeemed-but-unapplied code. Extremely rare
+    // (the lock trigger would only fire here if status changed mid-request).
+    return { error: updateError.message };
+  }
+
+  revalidatePath(`/tasks/${taskId}`);
+  return {};
+}
+
+export async function removePromoCode(taskId: string): Promise<{ error?: string }> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return { error: "You must be signed in." };
+
+  const { data: task } = await supabase
+    .from("tasks")
+    .select("id, requester_id")
+    .eq("id", taskId)
+    .maybeSingle();
+  if (!task) return { error: "Task not found." };
+  if (task.requester_id !== user.id) return { error: "Only the Requester can remove a promo code." };
+
+  const { error: deleteError } = await supabase.from("promotion_redemptions").delete().eq("task_id", taskId);
+  if (deleteError) return { error: deleteError.message };
+
+  const { error: updateError } = await supabase
+    .from("tasks")
+    .update({ promo_code: null, discount_cents: 0 })
+    .eq("id", taskId);
+  if (updateError) return { error: updateError.message };
+
+  revalidatePath(`/tasks/${taskId}`);
+  return {};
+}
+
+/**
  * Requester-initiated confirmation. This is the ONLY thing that moves a
  * completed task toward payout — reaching "completed" never auto-triggers
  * it. Charges the Requester (price + tip) via Stripe Checkout; the webhook
@@ -101,7 +219,7 @@ export async function confirmCompletion(taskId: string): Promise<void> {
     changedByUser: user.id,
   })) as Task;
 
-  const chargeCents = totalChargeCents(updated.price_cents, updated.tip_cents);
+  const chargeCents = totalChargeCents(updated.price_cents, updated.tip_cents, updated.discount_cents);
 
   let checkoutUrl: string;
   try {
@@ -114,7 +232,13 @@ export async function confirmCompletion(taskId: string): Promise<void> {
             currency: updated.currency,
             unit_amount: chargeCents,
             product_data: {
-              name: updated.tip_cents > 0 ? `${updated.title} (incl. tip)` : updated.title,
+              name: [
+                updated.title,
+                updated.discount_cents > 0 ? `promo ${updated.promo_code ?? ""} applied` : null,
+                updated.tip_cents > 0 ? "incl. tip" : null,
+              ]
+                .filter(Boolean)
+                .join(" — "),
             },
           },
           quantity: 1,
