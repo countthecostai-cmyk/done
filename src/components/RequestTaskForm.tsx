@@ -142,18 +142,36 @@ export function RequestTaskForm({
         </div>
       )}
 
-      <div>
-        <label className="block text-sm font-medium text-neutral-700" htmlFor="address">
-          Address
-        </label>
-        <input
-          id="address"
-          name="address"
-          type="text"
-          required
-          placeholder="123 Main St, Austin, TX"
-          className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
-        />
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-2">
+          <label className="block text-sm font-medium text-neutral-700" htmlFor="address">
+            Address
+          </label>
+          <input
+            id="address"
+            name="address"
+            type="text"
+            required
+            placeholder="123 Main St, Austin, TX"
+            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-medium text-neutral-700" htmlFor="zip_code">
+            ZIP code
+          </label>
+          <input
+            id="zip_code"
+            name="zip_code"
+            type="text"
+            inputMode="numeric"
+            pattern="\d{5}"
+            maxLength={5}
+            required
+            placeholder="78701"
+            className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
+          />
+        </div>
       </div>
 
       <div>
