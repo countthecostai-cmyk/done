@@ -46,6 +46,9 @@ export async function Nav() {
               <Link href="/receipts" className="text-neutral-600 hover:text-neutral-900">
                 Receipts
               </Link>
+              <Link href="/support" className="text-neutral-600 hover:text-neutral-900">
+                Support
+              </Link>
               {!profile?.is_doer && DOER_APP_URL && (
                 <a
                   href={DOER_APP_URL}
