@@ -11,6 +11,7 @@ const createTaskSchema = z.object({
   address: z.string().min(3, "Enter a valid address"),
   quantity: z.coerce.number().positive().optional(),
   description: z.string().max(2000).optional(),
+  selected_addon_ids: z.array(z.string().uuid()).default([]),
 });
 
 export async function createTask(
@@ -22,6 +23,7 @@ export async function createTask(
     address: formData.get("address"),
     quantity: formData.get("quantity") || undefined,
     description: formData.get("description") || undefined,
+    selected_addon_ids: formData.getAll("selected_addon_ids"),
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Invalid input" };
@@ -42,6 +44,22 @@ export async function createTask(
     return { error: "That task type is not available." };
   }
 
+  // Never trust client-submitted addon ids as-is: keep only ids that are
+  // real, active add-ons belonging to *this* task type. This also protects
+  // the denormalized selected_addon_ids stored on the task from carrying
+  // stale/mismatched ids even though compute_task_pricing() would ignore
+  // them anyway (it joins on task_type_id) — data integrity, not just price.
+  let selectedAddonIds: string[] = [];
+  if (parsed.data.selected_addon_ids.length > 0) {
+    const { data: validAddons } = await supabase
+      .from("task_type_addons")
+      .select("id")
+      .eq("task_type_id", taskType.id)
+      .eq("active", true)
+      .in("id", parsed.data.selected_addon_ids);
+    selectedAddonIds = (validAddons ?? []).map((a) => a.id);
+  }
+
   // price_cents / platform_fee_cents / doer_payout_cents are placeholders —
   // the tasks_recompute_pricing trigger overwrites them authoritatively on
   // insert from task_type + quantity + addons. Never trust these values.
@@ -54,6 +72,7 @@ export async function createTask(
       description: parsed.data.description ?? null,
       address: parsed.data.address,
       quantity: parsed.data.quantity ?? null,
+      selected_addon_ids: selectedAddonIds,
       price_cents: 0,
       platform_fee_cents: 0,
       doer_payout_cents: 0,

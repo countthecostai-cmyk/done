@@ -1,9 +1,11 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { RequestTaskForm } from "@/components/RequestTaskForm";
-import type { Category, TaskType } from "@/lib/database.types";
+import type { Category, TaskType, TaskTypeAddon } from "@/lib/database.types";
 
 export const dynamic = "force-dynamic";
+
+type TaskTypeWithAddons = TaskType & { task_type_addons: TaskTypeAddon[] };
 
 export default async function NewRequestPage() {
   const supabase = await createClient();
@@ -14,14 +16,22 @@ export default async function NewRequestPage() {
 
   const { data: categories } = await supabase
     .from("categories")
-    .select("*, task_types(*)")
+    .select("*, task_types(*, task_type_addons(*))")
     .eq("active", true)
     .order("sort_order");
 
   const categoriesWithTypes =
-    (categories as (Category & { task_types: TaskType[] })[] | null)?.map((c) => ({
+    (categories as (Category & { task_types: TaskTypeWithAddons[] })[] | null)?.map((c) => ({
       ...c,
-      task_types: c.task_types.filter((t) => t.active).sort((a, b) => a.sort_order - b.sort_order),
+      task_types: c.task_types
+        .filter((t) => t.active)
+        .sort((a, b) => a.sort_order - b.sort_order)
+        .map((t) => ({
+          ...t,
+          task_type_addons: t.task_type_addons
+            .filter((a) => a.active)
+            .sort((a, b) => a.sort_order - b.sort_order),
+        })),
     })) ?? [];
 
   return (
