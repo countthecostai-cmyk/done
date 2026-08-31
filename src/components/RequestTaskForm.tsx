@@ -191,7 +191,7 @@ export function RequestTaskForm({
         <span className="text-lg font-semibold">{formatCents(estimate)}</span>
       </div>
 
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
 
       <button
         type="submit"

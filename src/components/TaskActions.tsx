@@ -95,7 +95,7 @@ function TipForm({ taskId, tipCents }: { taskId: string; tipCents: number }) {
           {pending ? "Saving…" : "Save tip"}
         </button>
       </div>
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
     </form>
   );
 }
@@ -129,7 +129,7 @@ function RateForm({ taskId }: { taskId: string }) {
         placeholder="Leave a comment (optional)"
         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
       />
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
       <button
         type="submit"
         disabled={pending}
@@ -157,7 +157,7 @@ function ReportProblemForm({ taskId, onCancel }: { taskId: string; onCancel: () 
         placeholder="What went wrong?"
         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
       />
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
       <div className="flex gap-2">
         <button
           type="submit"
@@ -201,7 +201,7 @@ function CancelForm({ taskId }: { taskId: string }) {
         placeholder="Reason (optional)"
         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
       />
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
       <button
         type="submit"
         disabled={pending}

@@ -22,7 +22,7 @@ export function TicketReplyForm({ ticketId }: { ticketId: string }) {
         placeholder="Add more detail or reply to Done Support…"
         className="w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm"
       />
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
       <button
         type="submit"
         disabled={pending}
@@ -70,7 +70,7 @@ export function TicketResolutionActions({ ticketId }: { ticketId: string }) {
           {reopenPending ? "Reopening…" : "No, reopen it"}
         </button>
       </form>
-      {reopenState?.error && <p className="text-sm text-red-600">{reopenState.error}</p>}
+      {reopenState?.error && <p role="alert" className="text-sm text-red-600">{reopenState.error}</p>}
     </div>
   );
 }

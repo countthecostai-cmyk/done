@@ -47,7 +47,7 @@ function ApplyPromoForm({ taskId }: { taskId: string }) {
           {pending ? "Applying…" : "Apply"}
         </button>
       </div>
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
     </form>
   );
 }
@@ -83,7 +83,7 @@ function AppliedPromo({
       >
         {pending ? "Removing…" : "Remove"}
       </button>
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
     </form>
   );
 }

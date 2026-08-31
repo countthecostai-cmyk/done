@@ -80,7 +80,7 @@ export function NewTicketForm({ tasks }: { tasks: { id: string; title: string; c
         />
       </div>
 
-      {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="text-sm text-red-600">{state.error}</p>}
 
       <button
         type="submit"

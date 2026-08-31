@@ -99,7 +99,7 @@ export function TaskMessages({
           Send
         </button>
       </form>
-      {state?.error && <p className="px-4 pb-3 text-sm text-red-600">{state.error}</p>}
+      {state?.error && <p role="alert" className="px-4 pb-3 text-sm text-red-600">{state.error}</p>}
     </div>
   );
 }
