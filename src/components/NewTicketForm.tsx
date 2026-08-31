@@ -32,7 +32,7 @@ export function NewTicketForm({ tasks }: { tasks: { id: string; title: string; c
       {tasks.length > 0 && (
         <div>
           <label htmlFor="related_task_id" className="mb-1 block text-sm font-medium text-neutral-900">
-            Related task <span className="font-normal text-neutral-400">(optional)</span>
+            Related task <span className="font-normal text-neutral-500">(optional)</span>
           </label>
           <select
             id="related_task_id"

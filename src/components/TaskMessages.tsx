@@ -62,7 +62,7 @@ export function TaskMessages({
       </div>
       <div className="max-h-72 space-y-2 overflow-y-auto px-4 py-3">
         {messages.length === 0 && (
-          <p className="text-sm text-neutral-400">No messages yet — say hello.</p>
+          <p className="text-sm text-neutral-500">No messages yet — say hello.</p>
         )}
         {messages.map((m) => {
           const isMine = m.sender_id === currentUserId;
@@ -74,7 +74,7 @@ export function TaskMessages({
                 }`}
               >
                 <p>{m.body}</p>
-                <p className={`mt-1 text-[10px] ${isMine ? "text-neutral-300" : "text-neutral-400"}`}>
+                <p className={`mt-1 text-[10px] ${isMine ? "text-neutral-300" : "text-neutral-500"}`}>
                   {new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 </p>
               </div>

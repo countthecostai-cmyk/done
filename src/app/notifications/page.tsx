@@ -44,7 +44,7 @@ export default async function NotificationsPage() {
                 <div>
                   <p className="text-sm font-medium text-neutral-900">{n.title}</p>
                   {n.body && <p className="mt-0.5 text-sm text-neutral-600">{n.body}</p>}
-                  <p className="mt-1 text-xs text-neutral-400">{new Date(n.created_at).toLocaleString()}</p>
+                  <p className="mt-1 text-xs text-neutral-500">{new Date(n.created_at).toLocaleString()}</p>
                 </div>
                 {!n.read_at && (
                   <form action={markNotificationRead.bind(null, n.id)}>

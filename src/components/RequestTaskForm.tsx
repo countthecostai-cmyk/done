@@ -58,7 +58,7 @@ export function RequestTaskForm({
           {categories.map((category) =>
             category.task_types.length === 0 ? null : (
               <div key={category.id}>
-                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-400">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-neutral-500">
                   {category.icon} {category.name}
                 </p>
                 <div className="grid gap-2">

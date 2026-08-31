@@ -82,7 +82,7 @@ export default async function ReceiptsPage() {
                           {payment.status}
                         </span>
                       ) : (
-                        <span className="text-neutral-400">not charged</span>
+                        <span className="text-neutral-500">not charged</span>
                       )}
                     </td>
                     <td className="px-4 py-3 text-neutral-500">{STATUS_LABELS[task.status]}</td>

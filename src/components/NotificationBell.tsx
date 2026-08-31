@@ -66,7 +66,7 @@ export function NotificationBell({
           </div>
           <div className="max-h-96 overflow-y-auto">
             {notifications.length === 0 && (
-              <p className="px-4 py-6 text-center text-sm text-neutral-400">Nothing yet.</p>
+              <p className="px-4 py-6 text-center text-sm text-neutral-500">Nothing yet.</p>
             )}
             {notifications.slice(0, 8).map((n) => (
               <button
@@ -85,7 +85,7 @@ export function NotificationBell({
               >
                 <p className="font-medium text-neutral-900">{n.title}</p>
                 {n.body && <p className="mt-0.5 text-xs text-neutral-500">{n.body}</p>}
-                <p className="mt-1 text-[10px] text-neutral-400">{new Date(n.created_at).toLocaleString()}</p>
+                <p className="mt-1 text-[10px] text-neutral-500">{new Date(n.created_at).toLocaleString()}</p>
               </button>
             ))}
           </div>
