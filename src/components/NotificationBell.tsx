@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { subscribeToNotifications } from "@/lib/realtime";
 import { markNotificationRead } from "@/app/notifications/actions";
@@ -16,13 +16,21 @@ export function NotificationBell({
 }) {
   const [notifications, setNotifications] = useState<NotificationRow[]>(initialNotifications);
   const [open, setOpen] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
 
   useEffect(() => {
     const supabase = createClient();
     const unsubscribe = subscribeToNotifications<NotificationRow>(supabase, userId, (payload) => {
       if (payload.eventType === "INSERT" && payload.new) {
         setNotifications((prev) => [payload.new as NotificationRow, ...prev].slice(0, 20));
+        // Notifications can arrive while the panel is closed (or off-screen for
+        // a screen reader user) — a badge count alone is silent to them, so
+        // announce arrivals through a live region instead of relying on sight.
+        const title = (payload.new as NotificationRow).title;
+        setAnnouncement(title ? `New notification: ${title}` : "New notification");
       } else if (payload.eventType === "UPDATE" && payload.new) {
         setNotifications((prev) =>
           prev.map((n) => (n.id === payload.new!.id ? { ...n, ...payload.new } : n))
@@ -36,28 +44,53 @@ export function NotificationBell({
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && open) {
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
     document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [open]);
 
   const unreadCount = notifications.filter((n) => !n.read_at).length;
 
   return (
     <div className="relative" ref={containerRef}>
       <button
+        ref={triggerRef}
         onClick={() => setOpen((o) => !o)}
-        aria-label="Notifications"
+        aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-controls={panelId}
         className="relative rounded-lg p-1.5 text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900"
       >
         🔔
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-medium text-white">
+          <span
+            aria-hidden="true"
+            className="absolute -right-0.5 -top-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-red-600 text-[10px] font-medium text-white"
+          >
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
       </button>
+      <span aria-live="polite" className="sr-only">
+        {announcement}
+      </span>
       {open && (
-        <div className="absolute right-0 z-20 mt-2 w-80 rounded-lg border border-neutral-200 bg-white shadow-lg">
+        <div
+          id={panelId}
+          role="region"
+          aria-label="Notifications"
+          className="absolute right-0 z-20 mt-2 w-80 rounded-lg border border-neutral-200 bg-white shadow-lg"
+        >
           <div className="flex items-center justify-between border-b border-neutral-100 px-4 py-2">
             <span className="text-sm font-medium text-neutral-900">Notifications</span>
             <Link href="/notifications" className="text-xs font-medium text-neutral-500 hover:text-neutral-900">
